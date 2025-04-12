@@ -21,15 +21,23 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	})
 }
 
-// metricsHandler writes the number of requests processed as plain text.
-func (cfg *apiConfig) metricsHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+// adminMetricsHandler returns an HTML page with admin metrics.
+func (cfg *apiConfig) adminMetricsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	hits := cfg.fileserverHits.Load()
-	_, _ = fmt.Fprintf(w, "Hits: %d", hits)
+	page := fmt.Sprintf(`
+<html>
+  <body>
+    <h1>Welcome, Chirpy Admin</h1>
+    <p>Chirpy has been visited %d times!</p>
+  </body>
+</html>
+`, hits)
+	_, _ = w.Write([]byte(page))
 }
 
-// resetHandler resets the fileserverHits counter to 0.
-func (cfg *apiConfig) resetHandler(w http.ResponseWriter, r *http.Request) {
+// adminResetHandler resets the fileserverHits counter to 0.
+func (cfg *apiConfig) adminResetHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	cfg.fileserverHits.Store(0)
 	_, _ = w.Write([]byte("fileserverHits reset to 0"))
@@ -49,20 +57,18 @@ func main() {
 	// Use http.StripPrefix to remove the "/app" prefix before handing off to the FileServer.
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app", fs)))
 
-	// Readiness endpoint.
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		// Set the expected Content-Type header.
+	// Readiness endpoint; only allow GET requests.
+	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		// Write the status code.
 		w.WriteHeader(http.StatusOK)
-		// Write the response body.
 		_, _ = w.Write([]byte("OK"))
 	})
 
-	// Metrics endpoint to report the number of hits.
-	mux.HandleFunc("/metrics", apiCfg.metricsHandler)
-	// Reset endpoint to reset the counter.
-	mux.HandleFunc("/reset", apiCfg.resetHandler)
+	// Admin metrics endpoint to report the number of hits in HTML; only allow GET.
+	mux.HandleFunc("GET /admin/metrics", apiCfg.adminMetricsHandler)
+
+	// Admin reset endpoint to reset the counter; only allow POST.
+	mux.HandleFunc("POST /admin/reset", apiCfg.adminResetHandler)
 
 	// Create a new server using the ServeMux as its handler.
 	server := &http.Server{
@@ -71,7 +77,6 @@ func main() {
 	}
 
 	log.Println("Server is running on http://localhost:8080")
-	// Start the server. This call blocks until the server exits.
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
